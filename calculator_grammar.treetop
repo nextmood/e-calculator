@@ -1,0 +1,128 @@
+grammar CalculatorGrammar
+
+  rule main
+    set_all_parameters tail:(new_line statement)* {
+      def value(context)
+        (tail&.elements || []).inject([set_all_parameters.value]) do |l, elt| 
+          parameters = elt.statement.value(context)
+          parameters ? l << parameters : l
+        end
+      end
+    }
+  end
+
+  rule set_all_parameters
+    ((set_taux_percentage space* "," space* set_taux_fix) / (set_taux_fix space* "," space* set_taux_percentage)) {
+      def value
+          set_taux_percentage.value.merge(set_taux_fix.value)
+      end
+    }
+  end
+
+  rule set_taux_percentage
+    "TAUX=" space* percentage {
+      def value
+        { percentage: percentage.value }
+      end
+    }
+  end
+
+  rule set_taux_fix
+    "FIX=" space* amount_euro {
+      def value
+        { fix: amount_euro.value }
+      end
+    }
+  end
+  
+  rule statement
+    statement_on_order
+  end
+
+  rule statement_on_order
+    "si" space+ condition space+ "alors" space+ set_all_parameters {
+      def value(context)
+        set_all_parameters.value.merge(rule: "si #{condition.text_value}") if condition.value(context)
+      end
+    }
+  end
+
+  rule condition
+    predicate tail:(space+ operator:("ou"/"et") space+ predicate)* {
+      def value(context)
+        (tail&.elements || []).inject(predicate.value(context)) { |result, elt| 
+          case elt.operator.text_value
+            when "ou" then result || elt.predicate.value(context)
+            when "et" then result && elt.predicate.value(context)
+            else
+              raise "Unexpected case #{elt.operator.text_value.inspect}"
+          end
+         }
+      end
+      def to_s
+        "..."
+      end
+    }
+  end
+
+  rule logical_operator
+    "ou"/"et"
+  end
+
+  rule predicate
+    p_source / p_delivery / p_preparation_amount
+  end
+
+  rule p_source
+    "la commande est issue de" space+ source tail:(space* "," space* source)* {
+      def value(context)
+        sources = (tail&.elements || []).inject([source.text_value]) { |s, elt| s << elt.source.text_value }
+        sources.include?(context[:source])
+      end
+    }
+  end
+
+  rule source
+    "APP" / "WEB"
+  end
+
+  rule p_delivery
+    "la livraison est" space+ delivery tail:(space* "," space* delivery)* {
+      def value(context)
+        deliveries = (tail&.elements || []).inject([delivery.text_value]) { |s, elt| s << elt.delivery.text_value }
+        deliveries.include?(context[:delivery])
+      end
+    }
+  end
+
+  rule delivery
+    "CHRONO" / "PICKUP"
+  end
+
+  rule p_preparation_amount
+    "le montant de la commande excede" space+ amount_euro {
+      def value(context)
+        context[:preparation_amount_ttc] > amount_euro.value
+      end
+    }
+  end
+
+  rule new_line
+    [\n]
+  end
+  
+  rule space
+    [\s]
+  end
+
+  rule percentage
+    x:([\d]+) "%" { def value() x.text_value.to_i end }
+  end
+
+  rule amount_euro
+    x:([\d]+ "." [\d] [\d]) "E" { def value() x.text_value.to_f end }
+  end
+
+
+
+end
